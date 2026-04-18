@@ -1,53 +1,82 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+import { MD3LightTheme } from 'react-native-paper';
 
-import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const ubGreen = '#006400';
+const ubGreenDeep = '#0B3D0B';
+const ubGreenSoft = '#E8F4E8';
+const ubGold = '#D4A017';
+const ubCream = '#F7FAF5';
 
 export const Colors = {
+  brand: {
+    primary: ubGreen,
+    primaryDark: ubGreenDeep,
+    primarySoft: ubGreenSoft,
+    accent: ubGold,
+    background: ubCream,
+    surface: '#FFFFFF',
+    border: '#D7E3D0',
+    text: '#17301A',
+    textMuted: '#5F7261',
+    mapWater: '#CFE8FF',
+    mapLand: '#E8F3E4',
+    route: '#F57C00',
+  },
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: '#17301A',
+    background: ubCream,
+    tint: ubGreen,
+    icon: '#5F7261',
+    tabIconDefault: '#6C806D',
+    tabIconSelected: ubGreen,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: '#FFFFFF',
+    background: ubGreenDeep,
+    tint: '#FFFFFF',
+    icon: '#D7E3D0',
+    tabIconDefault: '#D7E3D0',
+    tabIconSelected: '#FFFFFF',
   },
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+export const UBTheme = {
+  ...MD3LightTheme,
+  roundness: 24,
+  colors: {
+    ...MD3LightTheme.colors,
+    primary: ubGreen,
+    onPrimary: '#FFFFFF',
+    primaryContainer: '#B7D9B0',
+    onPrimaryContainer: ubGreenDeep,
+    secondary: '#3C7A3F',
+    onSecondary: '#FFFFFF',
+    secondaryContainer: '#D3EBCF',
+    onSecondaryContainer: '#17301A',
+    tertiary: ubGold,
+    onTertiary: '#1E1E1E',
+    tertiaryContainer: '#FFE9AE',
+    onTertiaryContainer: '#433000',
+    background: ubCream,
+    onBackground: '#17301A',
+    surface: '#FFFFFF',
+    onSurface: '#17301A',
+    surfaceVariant: '#EEF5EA',
+    onSurfaceVariant: '#516351',
+    outline: '#C3D1BC',
+    outlineVariant: '#D7E3D0',
+    error: '#B3261E',
+    onError: '#FFFFFF',
+    errorContainer: '#F9DEDC',
+    onErrorContainer: '#410E0B',
+    elevation: {
+      level0: 'transparent',
+      level1: '#F6FBF4',
+      level2: '#EFF7EC',
+      level3: '#E8F4E5',
+      level4: '#E3F0E0',
+      level5: '#DDEBDA',
+    },
   },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+};
+
+export type UBThemeType = typeof UBTheme;
