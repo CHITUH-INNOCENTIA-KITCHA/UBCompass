@@ -2,14 +2,18 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View, ActivityIndicator } from 'react-native';
 import { Button, Chip, Divider, Searchbar, Surface, Text } from 'react-native-paper';
 
-import { campusBuildings, recentQueries } from '@/constants/mock-campus-data';
+import { useBuildings } from '@/hooks/use-buildings';
 import { Colors } from '@/constants/theme';
 
 export default function SearchScreen() {
+  const { buildings: campusBuildings, isLoading } = useBuildings();
   const [query, setQuery] = useState('');
+
+  // Fallback recent queries list for now
+  const recentQueries = ['FOS', 'Library', 'Admin'];
 
   const results = useMemo(() => {
     if (!query.trim()) {
@@ -21,17 +25,24 @@ export default function SearchScreen() {
     return campusBuildings.filter((building) => {
       return (
         building.name.toLowerCase().includes(normalizedQuery) ||
-        building.shortName.toLowerCase().includes(normalizedQuery) ||
+        building.short_name.toLowerCase().includes(normalizedQuery) ||
         building.category.toLowerCase().includes(normalizedQuery) ||
         building.highlights.some((item) => item.toLowerCase().includes(normalizedQuery))
       );
     });
-  }, [query]);
+  }, [query, campusBuildings]);
 
   const featuredResult = results[0];
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      {isLoading && campusBuildings.length === 0 ? (
+        <View style={{ justifyContent: 'center', alignItems: 'center', paddingVertical: 60 }}>
+          <ActivityIndicator size="large" color={Colors.brand.primary} />
+          <Text style={{ marginTop: 12 }}>Loading search data...</Text>
+        </View>
+      ) : (
+        <>
       <View style={styles.heroCard}>
         <View style={styles.heroIconWrap}>
           <MaterialCommunityIcons name="map-search-outline" size={28} color="#FFFFFF" />
@@ -208,6 +219,8 @@ export default function SearchScreen() {
           ))
         )}
       </Surface>
+      </>
+      )}
     </ScrollView>
   );
 }

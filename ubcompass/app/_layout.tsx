@@ -8,6 +8,8 @@ import 'react-native-reanimated';
 import { LaunchScreen } from '@/components/launch-screen';
 import { UBTheme } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useBuildingsStore } from '@/store/use-buildings-store';
+import { useImagesStore } from '@/store/use-images-store';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -16,14 +18,20 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [showLaunchScreen, setShowLaunchScreen] = useState(true);
+  const { fetchBuildings } = useBuildingsStore();
+  const { fetchImages } = useImagesStore();
 
   useEffect(() => {
+    // Initialize data stores
+    fetchBuildings();
+    fetchImages();
+
     const timeout = setTimeout(() => {
       setShowLaunchScreen(false);
     }, 1800);
 
     return () => clearTimeout(timeout);
-  }, []);
+  }, [fetchBuildings, fetchImages]);
 
   if (showLaunchScreen) {
     return (

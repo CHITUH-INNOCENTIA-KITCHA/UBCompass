@@ -6,11 +6,12 @@ import {
   Pressable,
   StyleSheet,
   View,
+  ActivityIndicator,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import { Appbar, Button, Chip, Searchbar, Surface, Text } from 'react-native-paper';
 
-import { campusBuildings } from '@/constants/mock-campus-data';
+import { useBuildings } from '@/hooks/use-buildings';
 import { Colors } from '@/constants/theme';
 
 const SHEET_EXPANDED_HEIGHT = 320;
@@ -19,11 +20,37 @@ const SHEET_TRAVEL = SHEET_EXPANDED_HEIGHT - SHEET_COLLAPSED_HEIGHT;
 
 export default function DirectionsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { buildings: campusBuildings, isLoading } = useBuildings();
   const mapRef = useRef<MapView | null>(null);
   const sheetOffset = useRef(new Animated.Value(0)).current;
   const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
   const destination = campusBuildings.find((building) => building.id === id) ?? campusBuildings[0];
   const mainGate = { name: 'Main Gate', latitude: 4.1537, longitude: 9.2837 };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 8,
+      onPanResponderMove: (_, gestureState) => {
+        const nextValue = isSheetCollapsed
+          ? SHEET_TRAVEL + gestureState.dy
+          : gestureState.dy;
+        sheetOffset.setValue(Math.max(0, Math.min(SHEET_TRAVEL, nextValue)));
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const threshold = SHEET_TRAVEL / 3;
+
+        if (isSheetCollapsed) {
+          animateSheet(!(gestureState.dy < -threshold));
+          return;
+        }
+
+        animateSheet(gestureState.dy > threshold);
+      },
+      onPanResponderTerminate: () => {
+        animateSheet(isSheetCollapsed);
+      },
+    })
+  ).current;
 
   const routeCoordinates = useMemo(() => {
     const midpoint = {
@@ -51,15 +78,13 @@ export default function DirectionsScreen() {
     return Math.max(4, Math.round(distance * 12));
   }, [routeDistanceKm]);
 
-  const routeRegion = {
-    latitude: (mainGate.latitude + destination.latitude) / 2,
-    longitude: (mainGate.longitude + destination.longitude) / 2,
-    latitudeDelta: Math.max(Math.abs(destination.latitude - mainGate.latitude) * 2.6, 0.0045),
-    longitudeDelta: Math.max(
-      Math.abs(destination.longitude - mainGate.longitude) * 2.6,
-      0.0045
-    ),
-  };
+  if (isLoading && !destination) {
+    return (
+      <View style={[styles.screen, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={Colors.brand.primary} />
+      </View>
+    );
+  }
 
   const animateSheet = (collapsed: boolean) => {
     setIsSheetCollapsed(collapsed);
@@ -72,30 +97,15 @@ export default function DirectionsScreen() {
     }).start();
   };
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 8,
-      onPanResponderMove: (_, gestureState) => {
-        const nextValue = isSheetCollapsed
-          ? SHEET_TRAVEL + gestureState.dy
-          : gestureState.dy;
-        sheetOffset.setValue(Math.max(0, Math.min(SHEET_TRAVEL, nextValue)));
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const threshold = SHEET_TRAVEL / 3;
-
-        if (isSheetCollapsed) {
-          animateSheet(!(gestureState.dy < -threshold));
-          return;
-        }
-
-        animateSheet(gestureState.dy > threshold);
-      },
-      onPanResponderTerminate: () => {
-        animateSheet(isSheetCollapsed);
-      },
-    })
-  ).current;
+  const routeRegion = {
+    latitude: (mainGate.latitude + destination.latitude) / 2,
+    longitude: (mainGate.longitude + destination.longitude) / 2,
+    latitudeDelta: Math.max(Math.abs(destination.latitude - mainGate.latitude) * 2.6, 0.0045),
+    longitudeDelta: Math.max(
+      Math.abs(destination.longitude - mainGate.longitude) * 2.6,
+      0.0045
+    ),
+  };
 
   return (
     <View style={styles.screen}>

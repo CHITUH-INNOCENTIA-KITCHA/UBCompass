@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View, ActivityIndicator } from 'react-native';
 import {
   Button,
   Chip,
@@ -10,10 +10,16 @@ import {
   TextInput,
 } from 'react-native-paper';
 
-import { campusBuildings, indoorPreviewFloors } from '@/constants/mock-campus-data';
+import { useBuildings } from '@/hooks/use-buildings';
 import { Colors } from '@/constants/theme';
 
 export default function IndoorScreen() {
+  const { buildings: campusBuildings, isLoading } = useBuildings();
+  const indoorPreviewFloors = [
+    { value: '0', label: 'Ground' },
+    { value: '1', label: '1st' },
+    { value: '2', label: '2nd' },
+  ];
   const indoorBuildings = campusBuildings.filter((building) => building.hasIndoorMap);
   const [selectedBuildingId, setSelectedBuildingId] = useState(indoorBuildings[0]?.id ?? '');
   const [selectedFloor, setSelectedFloor] = useState('0');
@@ -36,6 +42,14 @@ export default function IndoorScreen() {
     ],
     [destination, origin, selectedBuilding.accessibleEntrance]
   );
+
+  if (isLoading && indoorBuildings.length === 0) {
+    return (
+      <View style={[styles.screen, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={Colors.brand.primary} />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>

@@ -2,7 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View, ActivityIndicator } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import {
   Button,
@@ -15,11 +15,14 @@ import {
   useTheme,
 } from 'react-native-paper';
 
-import { campusBuildings, campusImages } from '@/constants/mock-campus-data';
+import { useBuildings } from '@/hooks/use-buildings';
+import { useImages } from '@/hooks/use-images';
 import { Colors } from '@/constants/theme';
 
 export default function MapScreen() {
   const theme = useTheme();
+  const { buildings: campusBuildings, isLoading: buildingsLoading } = useBuildings();
+  const { images: campusImages } = useImages();
   const featuredBuildings = campusBuildings.slice(0, 4);
   const heroImage = campusImages[0];
   const galleryImages = campusImages.slice(1);
@@ -96,7 +99,13 @@ export default function MapScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {buildingsLoading && campusBuildings.length === 0 ? (
+        <View style={[styles.content, { justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color={Colors.brand.primary} />
+          <Text style={{ marginTop: 12 }}>Loading campus data...</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.heroCard}>
           <Image source={{ uri: heroImage.image }} style={styles.heroImage} contentFit="cover" />
           <View style={styles.heroOverlay} />
@@ -362,6 +371,7 @@ export default function MapScreen() {
           </Card>
         ))}
       </ScrollView>
+      )}
 
       <FAB
         icon={() => <MaterialCommunityIcons name="map-marker-radius" size={24} color="#FFFFFF" />}

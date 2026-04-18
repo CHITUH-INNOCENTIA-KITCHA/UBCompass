@@ -1,15 +1,24 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View, ActivityIndicator } from 'react-native';
 import { Appbar, Button, Chip, Divider, Surface, Text } from 'react-native-paper';
 
-import { campusBuildings } from '@/constants/mock-campus-data';
+import { useBuildings } from '@/hooks/use-buildings';
 import { Colors } from '@/constants/theme';
 
 export default function BuildingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { buildings: campusBuildings, isLoading } = useBuildings();
   const building = campusBuildings.find((item) => item.id === id) ?? campusBuildings[0];
+
+  if (isLoading && !building) {
+    return (
+      <View style={[styles.screen, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={Colors.brand.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.screen}>
