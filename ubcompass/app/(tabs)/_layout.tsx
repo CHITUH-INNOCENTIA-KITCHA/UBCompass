@@ -1,22 +1,22 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Tabs } from 'expo-router';
 
+import { AnimatedTabBar } from '@/components/navigation/animated-tab-bar';
 import { Colors } from '@/constants/theme';
 
 export default function TabLayout() {
   return (
     <Tabs
+      tabBar={(props) => <AnimatedTabBar {...props} />}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: Colors.brand.primary,
         tabBarInactiveTintColor: '#6C806D',
         tabBarStyle: {
-          height: 72,
-          paddingBottom: 10,
-          paddingTop: 10,
-          backgroundColor: '#FFFFFF',
+          position: 'absolute',
+          backgroundColor: 'transparent',
           borderTopWidth: 0,
-          elevation: 16,
+          elevation: 0,
         },
         tabBarLabelStyle: {
           fontSize: 12,
