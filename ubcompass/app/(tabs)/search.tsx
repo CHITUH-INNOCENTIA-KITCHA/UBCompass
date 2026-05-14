@@ -23,11 +23,13 @@ export default function SearchScreen() {
     const normalizedQuery = query.toLowerCase();
 
     return campusBuildings.filter((building) => {
+      const shortName = building.short_name ?? building.shortName ?? '';
+      const highlights = building.highlights ?? [];
       return (
-        building.name.toLowerCase().includes(normalizedQuery) ||
-        building.short_name.toLowerCase().includes(normalizedQuery) ||
-        building.category.toLowerCase().includes(normalizedQuery) ||
-        building.highlights.some((item) => item.toLowerCase().includes(normalizedQuery))
+        building.name?.toLowerCase().includes(normalizedQuery) ||
+        shortName.toLowerCase().includes(normalizedQuery) ||
+        building.category?.toLowerCase().includes(normalizedQuery) ||
+        highlights.some((item) => item?.toLowerCase().includes(normalizedQuery))
       );
     });
   }, [query, campusBuildings]);
