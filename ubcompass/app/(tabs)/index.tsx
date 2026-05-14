@@ -40,6 +40,10 @@ export default function MapScreen() {
   };
 
   const routeCoordinates = useMemo(() => {
+    if (!selectedMapBuilding) {
+      return [{ latitude: mainGate.latitude, longitude: mainGate.longitude }];
+    }
+
     const midpoint = {
       latitude: (mainGate.latitude + selectedMapBuilding.latitude) / 2 + 0.00025,
       longitude: (mainGate.longitude + selectedMapBuilding.longitude) / 2 - 0.00012,
@@ -53,11 +57,15 @@ export default function MapScreen() {
   }, [
     mainGate.latitude,
     mainGate.longitude,
-    selectedMapBuilding.latitude,
-    selectedMapBuilding.longitude,
+    selectedMapBuilding?.latitude,
+    selectedMapBuilding?.longitude,
   ]);
 
   const routeDistanceKm = useMemo(() => {
+    if (!selectedMapBuilding) {
+      return '0.0';
+    }
+
     const latDiff = selectedMapBuilding.latitude - mainGate.latitude;
     const lonDiff = selectedMapBuilding.longitude - mainGate.longitude;
     const approxKm = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111;
@@ -66,8 +74,8 @@ export default function MapScreen() {
   }, [
     mainGate.latitude,
     mainGate.longitude,
-    selectedMapBuilding.latitude,
-    selectedMapBuilding.longitude,
+    selectedMapBuilding?.latitude,
+    selectedMapBuilding?.longitude,
   ]);
 
   const routeDurationMin = useMemo(() => {
@@ -145,7 +153,7 @@ export default function MapScreen() {
             <View style={styles.mapSearchWrap}>
               <Searchbar
                 placeholder="Search buildings, rooms, or facilities"
-                value={selectedMapBuilding.name}
+                value={selectedMapBuilding?.name ?? ''}
                 editable={false}
                 onPressIn={() => router.push('/search')}
                 style={styles.mapSearchbar}
@@ -198,9 +206,9 @@ export default function MapScreen() {
             <View style={styles.mapOverlayBottom}>
               <View style={styles.overlayTopRow}>
                 <View style={styles.overlayTitleCopy}>
-                  <Text variant="titleMedium">{selectedMapBuilding.name}</Text>
+                  <Text variant="titleMedium">{selectedMapBuilding?.name ?? 'Select a building'}</Text>
                   <Text variant="bodySmall" style={styles.overlayCopy}>
-                    {selectedMapBuilding.description}
+                    {selectedMapBuilding?.description ?? ''}
                   </Text>
                 </View>
               </View>
@@ -253,8 +261,9 @@ export default function MapScreen() {
             <Button
               mode="contained-tonal"
               icon="directions"
+              disabled={!selectedMapBuilding}
               onPress={() =>
-                router.push({
+                selectedMapBuilding && router.push({
                   pathname: '/directions/[id]',
                   params: { id: selectedMapBuilding.id },
                 })
@@ -264,8 +273,9 @@ export default function MapScreen() {
             <Button
               mode="outlined"
               icon="information-outline"
+              disabled={!selectedMapBuilding}
               onPress={() =>
-                router.push({
+                selectedMapBuilding && router.push({
                   pathname: '/building/[id]',
                   params: { id: selectedMapBuilding.id },
                 })
