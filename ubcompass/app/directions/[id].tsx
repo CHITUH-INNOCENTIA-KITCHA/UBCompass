@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   PanResponder,
@@ -8,24 +8,110 @@ import {
   View,
   ActivityIndicator,
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
-import { Appbar, Button, Chip, Searchbar, Surface, Text } from 'react-native-paper';
+import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import { Appbar, Button, Chip, Portal, Searchbar, Snackbar, Surface, Text } from 'react-native-paper';
 
 import { useBuildings } from '@/hooks/use-buildings';
+import { useLocation } from '@/hooks/use-location';
+import { useAppStore } from '@/store/app-store';
 import { Colors } from '@/constants/theme';
+import { getWalkingRoute, formatDistance, formatDuration, type Coordinate } from '@/utils/osm-routing';
 
 const SHEET_EXPANDED_HEIGHT = 320;
 const SHEET_COLLAPSED_HEIGHT = 92;
 const SHEET_TRAVEL = SHEET_EXPANDED_HEIGHT - SHEET_COLLAPSED_HEIGHT;
 
+// Default starting point when GPS is not available
+const MAIN_GATE = { name: 'Main Gate', latitude: 4.1537, longitude: 9.2837 };
+
 export default function DirectionsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { buildings: campusBuildings, isLoading } = useBuildings();
+  const { location, errorMsg: locationError } = useLocation(false);
+  const { accessibilityMode } = useAppStore();
+
   const mapRef = useRef<MapView | null>(null);
   const sheetOffset = useRef(new Animated.Value(0)).current;
   const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
+  const [routeCoordinates, setRouteCoordinates] = useState<Coordinate[]>([]);
+  const [routeDistance, setRouteDistance] = useState<number | null>(null);
+  const [routeDuration, setRouteDuration] = useState<number | null>(null);
+  const [isLoadingRoute, setIsLoadingRoute] = useState(true);
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+
   const destination = campusBuildings.find((building) => building.id === id) ?? campusBuildings[0];
-  const mainGate = { name: 'Main Gate', latitude: 4.1537, longitude: 9.2837 };
+
+  // Determine starting point - use GPS location if available, otherwise use Main Gate
+  const startPoint = useMemo(() => {
+    if (location) {
+      return {
+        name: 'Your Location',
+        latitude: location.latitude,
+        longitude: location.longitude,
+      };
+    }
+    return MAIN_GATE;
+  }, [location]);
+
+  // Fetch route from OSRM
+  useEffect(() => {
+    if (!destination) return;
+
+    const fetchRoute = async () => {
+      setIsLoadingRoute(true);
+      try {
+        const result = await getWalkingRoute(
+          { latitude: startPoint.latitude, longitude: startPoint.longitude },
+          { latitude: destination.latitude, longitude: destination.longitude }
+        );
+
+        if (result) {
+          setRouteCoordinates(result.coordinates);
+          setRouteDistance(result.distance);
+          setRouteDuration(result.duration);
+        } else {
+          // Fallback to simple line if OSRM fails
+          const midpoint = {
+            latitude: (startPoint.latitude + destination.latitude) / 2 + 0.00025,
+            longitude: (startPoint.longitude + destination.longitude) / 2 - 0.00012,
+          };
+          setRouteCoordinates([
+            { latitude: startPoint.latitude, longitude: startPoint.longitude },
+            midpoint,
+            { latitude: destination.latitude, longitude: destination.longitude },
+          ]);
+          // Estimate distance
+          const latDiff = destination.latitude - startPoint.latitude;
+          const lonDiff = destination.longitude - startPoint.longitude;
+          const approxMeters = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111000;
+          setRouteDistance(approxMeters);
+          setRouteDuration(approxMeters / 1.4);
+          setSnackbarMessage('Using estimated route (offline mode)');
+          setSnackbarVisible(true);
+        }
+      } catch (error) {
+        console.error('Route fetch error:', error);
+        setSnackbarMessage('Failed to fetch route');
+        setSnackbarVisible(true);
+      } finally {
+        setIsLoadingRoute(false);
+      }
+    };
+
+    fetchRoute();
+  }, [destination?.id, startPoint.latitude, startPoint.longitude]);
+
+  // Format display values
+  const routeDistanceDisplay = useMemo(() => {
+    if (routeDistance === null) return '-- km';
+    return formatDistance(routeDistance);
+  }, [routeDistance]);
+
+  const routeDurationDisplay = useMemo(() => {
+    if (routeDuration === null) return '-- min';
+    return formatDuration(routeDuration);
+  }, [routeDuration]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -52,40 +138,6 @@ export default function DirectionsScreen() {
     })
   ).current;
 
-  const routeCoordinates = useMemo(() => {
-    const midpoint = {
-      latitude: (mainGate.latitude + destination.latitude) / 2 + 0.00025,
-      longitude: (mainGate.longitude + destination.longitude) / 2 - 0.00012,
-    };
-
-    return [
-      { latitude: mainGate.latitude, longitude: mainGate.longitude },
-      midpoint,
-      { latitude: destination.latitude, longitude: destination.longitude },
-    ];
-  }, [destination.latitude, destination.longitude, mainGate.latitude, mainGate.longitude]);
-
-  const routeDistanceKm = useMemo(() => {
-    const latDiff = destination.latitude - mainGate.latitude;
-    const lonDiff = destination.longitude - mainGate.longitude;
-    const approxKm = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111;
-
-    return approxKm.toFixed(1);
-  }, [destination.latitude, destination.longitude, mainGate.latitude, mainGate.longitude]);
-
-  const routeDurationMin = useMemo(() => {
-    const distance = Number(routeDistanceKm);
-    return Math.max(4, Math.round(distance * 12));
-  }, [routeDistanceKm]);
-
-  if (isLoading && !destination) {
-    return (
-      <View style={[styles.screen, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={Colors.brand.primary} />
-      </View>
-    );
-  }
-
   const animateSheet = (collapsed: boolean) => {
     setIsSheetCollapsed(collapsed);
     Animated.spring(sheetOffset, {
@@ -97,15 +149,41 @@ export default function DirectionsScreen() {
     }).start();
   };
 
-  const routeRegion = {
-    latitude: (mainGate.latitude + destination.latitude) / 2,
-    longitude: (mainGate.longitude + destination.longitude) / 2,
-    latitudeDelta: Math.max(Math.abs(destination.latitude - mainGate.latitude) * 2.6, 0.0045),
-    longitudeDelta: Math.max(
-      Math.abs(destination.longitude - mainGate.longitude) * 2.6,
-      0.0045
-    ),
+  // Calculate map region to fit both points
+  const routeRegion = useMemo(() => {
+    return {
+      latitude: (startPoint.latitude + destination.latitude) / 2,
+      longitude: (startPoint.longitude + destination.longitude) / 2,
+      latitudeDelta: Math.max(Math.abs(destination.latitude - startPoint.latitude) * 2.6, 0.0045),
+      longitudeDelta: Math.max(Math.abs(destination.longitude - startPoint.longitude) * 2.6, 0.0045),
+    };
+  }, [startPoint, destination]);
+
+  // Focus on user's location
+  const focusOnUser = () => {
+    if (location) {
+      mapRef.current?.animateToRegion(
+        {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          latitudeDelta: 0.003,
+          longitudeDelta: 0.003,
+        },
+        500
+      );
+    } else {
+      setSnackbarMessage('Location not available');
+      setSnackbarVisible(true);
+    }
   };
+
+  if (isLoading && !destination) {
+    return (
+      <View style={[styles.screen, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={Colors.brand.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -117,25 +195,63 @@ export default function DirectionsScreen() {
         rotateEnabled={false}
         pitchEnabled={false}
         toolbarEnabled={false}>
-        <Marker
-          coordinate={{ latitude: mainGate.latitude, longitude: mainGate.longitude }}
-          title={mainGate.name}
-          description="Suggested starting point"
-          pinColor={Colors.brand.accent}
-        />
+        {/* User location blue dot (if GPS available) */}
+        {location && (
+          <>
+            <Circle
+              center={{ latitude: location.latitude, longitude: location.longitude }}
+              radius={location.accuracy ?? 20}
+              fillColor="rgba(66, 133, 244, 0.2)"
+              strokeColor="rgba(66, 133, 244, 0.5)"
+              strokeWidth={1}
+            />
+            <Marker
+              coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+              title="You are here"
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <View style={styles.blueDot}>
+                <View style={styles.blueDotInner} />
+              </View>
+            </Marker>
+          </>
+        )}
+
+        {/* Starting point marker (Main Gate if no GPS) */}
+        {!location && (
+          <Marker
+            coordinate={{ latitude: MAIN_GATE.latitude, longitude: MAIN_GATE.longitude }}
+            title={MAIN_GATE.name}
+            description="Starting point"
+            pinColor={Colors.brand.accent}
+          />
+        )}
+
+        {/* Destination marker */}
         <Marker
           coordinate={{ latitude: destination.latitude, longitude: destination.longitude }}
           title={destination.name}
           description={destination.description}
           pinColor={Colors.brand.route}
         />
-        <Polyline coordinates={routeCoordinates} strokeColor={Colors.brand.route} strokeWidth={5} />
+
+        {/* Route line */}
+        {routeCoordinates.length > 0 && (
+          <Polyline
+            coordinates={routeCoordinates}
+            strokeColor={Colors.brand.route}
+            strokeWidth={5}
+          />
+        )}
       </MapView>
 
       <Appbar.Header style={styles.appbar}>
         <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title="Directions" subtitle="Walking route preview" />
-        <Appbar.Action icon="dots-vertical" onPress={() => {}} />
+        <Appbar.Content
+          title="Directions"
+          subtitle={location ? 'From your location' : 'From Main Gate'}
+        />
+        <Appbar.Action icon="crosshairs-gps" onPress={focusOnUser} />
       </Appbar.Header>
 
       <View style={styles.searchWrap}>
@@ -151,11 +267,21 @@ export default function DirectionsScreen() {
 
       <View style={styles.floatingChips}>
         <Chip icon="walk" style={styles.floatingChip}>
-          {routeDurationMin} min
+          {isLoadingRoute ? '...' : routeDurationDisplay}
         </Chip>
         <Chip icon="map-marker-distance" style={styles.floatingChip}>
-          {routeDistanceKm} km
+          {isLoadingRoute ? '...' : routeDistanceDisplay}
         </Chip>
+        {location && (
+          <Chip icon="crosshairs-gps" style={[styles.floatingChip, styles.gpsChip]}>
+            GPS
+          </Chip>
+        )}
+        {accessibilityMode && (
+          <Chip icon="wheelchair-accessibility" style={[styles.floatingChip, styles.accessibilityChip]}>
+            Accessible
+          </Chip>
+        )}
       </View>
 
       <View style={styles.recenterWrap}>
@@ -198,7 +324,7 @@ export default function DirectionsScreen() {
             <View style={styles.sheetTitleCopy}>
               <Text variant="headlineSmall">{destination.name}</Text>
               <Text variant="bodyMedium" style={styles.sheetSubtitle}>
-                From {mainGate.name} | Arrival in about {routeDurationMin} min
+                From {startPoint.name} | {isLoadingRoute ? 'Calculating...' : `Arrival in about ${routeDurationDisplay}`}
               </Text>
             </View>
             <Chip compact style={styles.categoryChip}>
@@ -220,7 +346,7 @@ export default function DirectionsScreen() {
                 Distance
               </Text>
               <Text variant="titleMedium" style={styles.statValue}>
-                {routeDistanceKm} km
+                {isLoadingRoute ? '...' : routeDistanceDisplay}
               </Text>
             </Surface>
             <Surface style={styles.statTile} elevation={0}>
@@ -241,7 +367,9 @@ export default function DirectionsScreen() {
                 </Text>
               </View>
               <Text variant="bodyMedium" style={styles.stepText}>
-                Start at {mainGate.name} and head toward the campus core.
+                {location
+                  ? 'Start from your current location and head toward the campus.'
+                  : `Start at ${MAIN_GATE.name} and head toward the campus core.`}
               </Text>
             </View>
             <View style={styles.stepRow}>
@@ -251,7 +379,7 @@ export default function DirectionsScreen() {
                 </Text>
               </View>
               <Text variant="bodyMedium" style={styles.stepText}>
-                Follow the main walking corridor toward {destination.shortName}.
+                Follow the walking path toward {destination.shortName}.
               </Text>
             </View>
             <View style={styles.stepRow}>
@@ -287,6 +415,19 @@ export default function DirectionsScreen() {
           </View>
         </Surface>
       </Animated.View>
+
+      <Portal>
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          duration={3000}
+          action={{
+            label: 'OK',
+            onPress: () => setSnackbarVisible(false),
+          }}>
+          {snackbarMessage}
+        </Snackbar>
+      </Portal>
     </View>
   );
 }
@@ -318,9 +459,16 @@ const styles = StyleSheet.create({
     left: 16,
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
   },
   floatingChip: {
     backgroundColor: 'rgba(255,255,255,0.96)',
+  },
+  gpsChip: {
+    backgroundColor: 'rgba(66, 133, 244, 0.15)',
+  },
+  accessibilityChip: {
+    backgroundColor: 'rgba(255, 152, 0, 0.15)',
   },
   recenterWrap: {
     position: 'absolute',
@@ -434,5 +582,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     flexWrap: 'wrap',
+  },
+  blueDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(66, 133, 244, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  blueDotInner: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#4285F4',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
 });
