@@ -1,6 +1,4 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type MapStyle = 'standard' | 'satellite' | 'highContrast';
 
@@ -44,66 +42,50 @@ interface AppState {
   clearRecentSearches: () => void;
 }
 
-export const useAppStore = create<AppState>()(
-  persist(
-    (set, get) => ({
-      // Default values
-      accessibilityMode: false,
-      showBuildingLabels: true,
-      autoCenterOnLocation: true,
-      mapStyle: 'standard',
-      selectedBuilding: null,
+export const useAppStore = create<AppState>()((set, get) => ({
+  // Default values
+  accessibilityMode: false,
+  showBuildingLabels: true,
+  autoCenterOnLocation: true,
+  mapStyle: 'standard',
+  selectedBuilding: null,
+  activeRoute: null,
+  routeDistance: null,
+  routeDuration: null,
+  recentSearches: [],
+
+  // Actions
+  setAccessibilityMode: (enabled) => set({ accessibilityMode: enabled }),
+
+  setShowBuildingLabels: (show) => set({ showBuildingLabels: show }),
+
+  setAutoCenterOnLocation: (autoCenter) => set({ autoCenterOnLocation: autoCenter }),
+
+  setMapStyle: (style) => set({ mapStyle: style }),
+
+  setSelectedBuilding: (building) => set({ selectedBuilding: building }),
+
+  setActiveRoute: (route, distance, duration) =>
+    set({
+      activeRoute: route,
+      routeDistance: distance ?? null,
+      routeDuration: duration ?? null,
+    }),
+
+  clearRoute: () =>
+    set({
       activeRoute: null,
       routeDistance: null,
       routeDuration: null,
-      recentSearches: [],
-
-      // Actions
-      setAccessibilityMode: (enabled) => set({ accessibilityMode: enabled }),
-
-      setShowBuildingLabels: (show) => set({ showBuildingLabels: show }),
-
-      setAutoCenterOnLocation: (autoCenter) => set({ autoCenterOnLocation: autoCenter }),
-
-      setMapStyle: (style) => set({ mapStyle: style }),
-
-      setSelectedBuilding: (building) => set({ selectedBuilding: building }),
-
-      setActiveRoute: (route, distance, duration) =>
-        set({
-          activeRoute: route,
-          routeDistance: distance ?? null,
-          routeDuration: duration ?? null,
-        }),
-
-      clearRoute: () =>
-        set({
-          activeRoute: null,
-          routeDistance: null,
-          routeDuration: null,
-        }),
-
-      addRecentSearch: (query) => {
-        const { recentSearches } = get();
-        // Remove if already exists, add to front, keep max 5
-        const filtered = recentSearches.filter((s) => s.toLowerCase() !== query.toLowerCase());
-        const updated = [query, ...filtered].slice(0, 5);
-        set({ recentSearches: updated });
-      },
-
-      clearRecentSearches: () => set({ recentSearches: [] }),
     }),
-    {
-      name: 'ubcompass-app-storage',
-      storage: createJSONStorage(() => AsyncStorage),
-      // Only persist settings, not transient navigation state
-      partialize: (state) => ({
-        accessibilityMode: state.accessibilityMode,
-        showBuildingLabels: state.showBuildingLabels,
-        autoCenterOnLocation: state.autoCenterOnLocation,
-        mapStyle: state.mapStyle,
-        recentSearches: state.recentSearches,
-      }),
-    }
-  )
-);
+
+  addRecentSearch: (query) => {
+    const { recentSearches } = get();
+    // Remove if already exists, add to front, keep max 5
+    const filtered = recentSearches.filter((s) => s.toLowerCase() !== query.toLowerCase());
+    const updated = [query, ...filtered].slice(0, 5);
+    set({ recentSearches: updated });
+  },
+
+  clearRecentSearches: () => set({ recentSearches: [] }),
+}));
