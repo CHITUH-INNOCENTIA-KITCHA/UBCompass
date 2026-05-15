@@ -15,7 +15,14 @@ import { useBuildings } from '@/hooks/use-buildings';
 import { useLocation } from '@/hooks/use-location';
 import { useAppStore } from '@/store/app-store';
 import { Colors } from '@/constants/theme';
-import { getWalkingRoute, formatDistance, formatDuration, type Coordinate } from '@/utils/osm-routing';
+import {
+  getWalkingRoute,
+  formatDistance,
+  formatDuration,
+  calculateHaversineDistance,
+  estimateWalkingTime,
+  type Coordinate,
+} from '@/utils/osm-routing';
 
 const SHEET_EXPANDED_HEIGHT = 320;
 const SHEET_COLLAPSED_HEIGHT = 92;
@@ -42,17 +49,42 @@ export default function DirectionsScreen() {
 
   const destination = campusBuildings.find((building) => building.id === id) ?? campusBuildings[0];
 
-  // Determine starting point - use GPS location if available, otherwise use Main Gate
+  // Check if user is far from campus (more than 5km from Main Gate)
+  const isUserFarFromCampus = useMemo(() => {
+    if (!location) return false;
+    const distanceFromCampus = calculateHaversineDistance(
+      { latitude: location.latitude, longitude: location.longitude },
+      { latitude: MAIN_GATE.latitude, longitude: MAIN_GATE.longitude }
+    );
+    return distanceFromCampus > 5000; // More than 5km away
+  }, [location]);
+
+  // Determine starting point - use GPS location if nearby, otherwise use Main Gate
   const startPoint = useMemo(() => {
-    if (location) {
+    if (location && !isUserFarFromCampus) {
       return {
         name: 'Your Location',
         latitude: location.latitude,
         longitude: location.longitude,
+        isGPS: true,
       };
     }
-    return MAIN_GATE;
-  }, [location]);
+    return { ...MAIN_GATE, isGPS: false };
+  }, [location, isUserFarFromCampus]);
+
+  // Show warning if user is far from campus
+  useEffect(() => {
+    if (isUserFarFromCampus && location) {
+      const distanceFromCampus = calculateHaversineDistance(
+        { latitude: location.latitude, longitude: location.longitude },
+        { latitude: MAIN_GATE.latitude, longitude: MAIN_GATE.longitude }
+      );
+      setSnackbarMessage(
+        `You are ${formatDistance(distanceFromCampus)} from campus. Showing route from Main Gate.`
+      );
+      setSnackbarVisible(true);
+    }
+  }, [isUserFarFromCampus, location]);
 
   // Fetch route from OSRM
   useEffect(() => {
@@ -81,12 +113,14 @@ export default function DirectionsScreen() {
             midpoint,
             { latitude: destination.latitude, longitude: destination.longitude },
           ]);
-          // Estimate distance
-          const latDiff = destination.latitude - startPoint.latitude;
-          const lonDiff = destination.longitude - startPoint.longitude;
-          const approxMeters = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111000;
+          // Estimate distance using proper Haversine formula
+          const approxMeters = calculateHaversineDistance(
+            { latitude: startPoint.latitude, longitude: startPoint.longitude },
+            { latitude: destination.latitude, longitude: destination.longitude }
+          );
           setRouteDistance(approxMeters);
-          setRouteDuration(approxMeters / 1.4);
+          // Estimate walking time at 5 km/h
+          setRouteDuration(estimateWalkingTime(approxMeters, 5));
           setSnackbarMessage('Using estimated route (offline mode)');
           setSnackbarVisible(true);
         }
