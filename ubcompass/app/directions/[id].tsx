@@ -49,19 +49,9 @@ export default function DirectionsScreen() {
 
   const destination = campusBuildings.find((building) => building.id === id) ?? campusBuildings[0];
 
-  // Check if user is far from campus (more than 5km from Main Gate)
-  const isUserFarFromCampus = useMemo(() => {
-    if (!location) return false;
-    const distanceFromCampus = calculateHaversineDistance(
-      { latitude: location.latitude, longitude: location.longitude },
-      { latitude: MAIN_GATE.latitude, longitude: MAIN_GATE.longitude }
-    );
-    return distanceFromCampus > 5000; // More than 5km away
-  }, [location]);
-
-  // Determine starting point - use GPS location if nearby, otherwise use Main Gate
+  // Determine starting point - always use GPS location if available
   const startPoint = useMemo(() => {
-    if (location && !isUserFarFromCampus) {
+    if (location) {
       return {
         name: 'Your Location',
         latitude: location.latitude,
@@ -70,21 +60,7 @@ export default function DirectionsScreen() {
       };
     }
     return { ...MAIN_GATE, isGPS: false };
-  }, [location, isUserFarFromCampus]);
-
-  // Show warning if user is far from campus
-  useEffect(() => {
-    if (isUserFarFromCampus && location) {
-      const distanceFromCampus = calculateHaversineDistance(
-        { latitude: location.latitude, longitude: location.longitude },
-        { latitude: MAIN_GATE.latitude, longitude: MAIN_GATE.longitude }
-      );
-      setSnackbarMessage(
-        `You are ${formatDistance(distanceFromCampus)} from campus. Showing route from Main Gate.`
-      );
-      setSnackbarVisible(true);
-    }
-  }, [isUserFarFromCampus, location]);
+  }, [location]);
 
   // Fetch route from OSRM
   useEffect(() => {
