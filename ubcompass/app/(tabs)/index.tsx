@@ -24,91 +24,103 @@ import { useAppStore } from '@/store/app-store';
 import { Colors } from '@/constants/theme';
 import { getWalkingRoute, formatDistance, formatDuration, type Coordinate } from '@/utils/osm-routing';
 
+// Constants outside component to avoid recreating
+const MAIN_GATE = { id: 'main-gate', name: 'Main Gate', latitude: 4.1537, longitude: 9.2837 };
+const CAMPUS_REGION = {
+  latitude: 4.1547,
+  longitude: 9.2853,
+  latitudeDelta: 0.0058,
+  longitudeDelta: 0.0058,
+};
+
 export default function MapScreen() {
   const theme = useTheme();
   const { buildings: campusBuildings, isLoading: buildingsLoading } = useBuildings();
   const { images: campusImages } = useImages();
-  const { location, errorMsg: locationError, isLoading: locationLoading } = useLocation();
-  const { accessibilityMode, setAccessibilityMode, autoCenterOnLocation } = useAppStore();
+  const { location, errorMsg: locationError } = useLocation(false); // Disable continuous tracking to prevent loops
+  const { accessibilityMode, setAccessibilityMode } = useAppStore();
 
   const featuredBuildings = campusBuildings.slice(0, 4);
   const heroImage = campusImages[0];
   const galleryImages = campusImages.slice(1);
-  const [selectedMapBuildingId, setSelectedMapBuildingId] = useState(featuredBuildings[0]?.id);
+  const [selectedMapBuildingId, setSelectedMapBuildingId] = useState<string | undefined>(undefined);
   const [routeCoordinates, setRouteCoordinates] = useState<Coordinate[]>([]);
   const [routeDistance, setRouteDistance] = useState<number | null>(null);
   const [routeDuration, setRouteDuration] = useState<number | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [hasInitialized, setHasInitialized] = useState(false);
 
   const mapRef = useRef<MapView | null>(null);
+
+  // Initialize selected building once when buildings load
+  useEffect(() => {
+    if (!hasInitialized && featuredBuildings.length > 0) {
+      setSelectedMapBuildingId(featuredBuildings[0]?.id);
+      setHasInitialized(true);
+    }
+  }, [featuredBuildings, hasInitialized]);
+
   const selectedMapBuilding =
     campusBuildings.find((building) => building.id === selectedMapBuildingId) ?? campusBuildings[0];
-  const mainGate = { id: 'main-gate', name: 'Main Gate', latitude: 4.1537, longitude: 9.2837 };
 
-  const campusRegion = {
-    latitude: 4.1547,
-    longitude: 9.2853,
-    latitudeDelta: 0.0058,
-    longitudeDelta: 0.0058,
-  };
-
-  // Show location error in snackbar
+  // Show location error in snackbar (only once)
+  const locationErrorShownRef = useRef(false);
   useEffect(() => {
-    if (locationError) {
+    if (locationError && !locationErrorShownRef.current) {
+      locationErrorShownRef.current = true;
       setSnackbarMessage(locationError);
       setSnackbarVisible(true);
     }
   }, [locationError]);
 
-  // Fetch route when building is selected
-  const fetchRoute = useCallback(async (destination: { latitude: number; longitude: number }) => {
-    const startPoint = location
-      ? { latitude: location.latitude, longitude: location.longitude }
-      : mainGate;
-
-    setIsLoadingRoute(true);
-    try {
-      const result = await getWalkingRoute(startPoint, destination);
-      if (result) {
-        setRouteCoordinates(result.coordinates);
-        setRouteDistance(result.distance);
-        setRouteDuration(result.duration);
-      } else {
-        // Fallback to simple line if OSRM fails
-        const midpoint = {
-          latitude: (startPoint.latitude + destination.latitude) / 2 + 0.00025,
-          longitude: (startPoint.longitude + destination.longitude) / 2 - 0.00012,
-        };
-        setRouteCoordinates([startPoint, midpoint, destination]);
-        // Estimate distance using Haversine
-        const latDiff = destination.latitude - startPoint.latitude;
-        const lonDiff = destination.longitude - startPoint.longitude;
-        const approxMeters = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111000;
-        setRouteDistance(approxMeters);
-        setRouteDuration(approxMeters / 1.4); // ~5 km/h walking speed
-        setSnackbarMessage('Using estimated route (offline mode)');
-        setSnackbarVisible(true);
-      }
-    } catch (error) {
-      console.error('Route fetch error:', error);
-      setSnackbarMessage('Failed to fetch route');
-      setSnackbarVisible(true);
-    } finally {
-      setIsLoadingRoute(false);
-    }
-  }, [location, mainGate]);
-
-  // Update route when selected building changes
+  // Calculate route - only when building ID changes, not on every render
   useEffect(() => {
-    if (selectedMapBuilding) {
-      fetchRoute({
+    if (!selectedMapBuilding) return;
+
+    const calculateRoute = async () => {
+      const startPoint = location
+        ? { latitude: location.latitude, longitude: location.longitude }
+        : MAIN_GATE;
+
+      const destination = {
         latitude: selectedMapBuilding.latitude,
         longitude: selectedMapBuilding.longitude,
-      });
-    }
-  }, [selectedMapBuilding?.id, fetchRoute]);
+      };
+
+      setIsLoadingRoute(true);
+      try {
+        const result = await getWalkingRoute(startPoint, destination);
+        if (result) {
+          setRouteCoordinates(result.coordinates);
+          setRouteDistance(result.distance);
+          setRouteDuration(result.duration);
+        } else {
+          // Fallback to simple line if OSRM fails
+          const midpoint = {
+            latitude: (startPoint.latitude + destination.latitude) / 2 + 0.00025,
+            longitude: (startPoint.longitude + destination.longitude) / 2 - 0.00012,
+          };
+          setRouteCoordinates([startPoint, midpoint, destination]);
+          // Estimate distance using Haversine
+          const latDiff = destination.latitude - startPoint.latitude;
+          const lonDiff = destination.longitude - startPoint.longitude;
+          const approxMeters = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111000;
+          setRouteDistance(approxMeters);
+          setRouteDuration(approxMeters / 1.4); // ~5 km/h walking speed
+        }
+      } catch (error) {
+        console.error('Route fetch error:', error);
+      } finally {
+        setIsLoadingRoute(false);
+      }
+    };
+
+    calculateRoute();
+    // Only re-run when building ID changes, NOT when location changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMapBuildingId]);
 
   // Formatted distance and duration for display
   const routeDistanceDisplay = useMemo(() => {
@@ -140,7 +152,7 @@ export default function MapScreen() {
   };
 
   const focusCampus = () => {
-    mapRef.current?.animateToRegion(campusRegion, 500);
+    mapRef.current?.animateToRegion(CAMPUS_REGION, 500);
   };
 
   const focusUserLocation = () => {
@@ -228,7 +240,7 @@ export default function MapScreen() {
               ref={mapRef}
               provider={PROVIDER_DEFAULT}
               style={styles.map}
-              initialRegion={campusRegion}
+              initialRegion={CAMPUS_REGION}
               rotateEnabled={false}
               pitchEnabled={false}
               toolbarEnabled={false}>
@@ -250,8 +262,8 @@ export default function MapScreen() {
                 />
               ))}
               <Marker
-                coordinate={{ latitude: mainGate.latitude, longitude: mainGate.longitude }}
-                title={mainGate.name}
+                coordinate={{ latitude: MAIN_GATE.latitude, longitude: MAIN_GATE.longitude }}
+                title={MAIN_GATE.name}
                 description="Suggested entry point"
                 pinColor={Colors.brand.accent}
               />
