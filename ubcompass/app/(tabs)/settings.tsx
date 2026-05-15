@@ -71,7 +71,7 @@ export default function SettingsScreen() {
         Preferences
       </Text>
       <Text variant="bodyLarge" style={styles.subtitle}>
-        Customize your UBCompass navigation experience. Settings are saved automatically.
+        Customize your UBCompass navigation experience.
       </Text>
 
       <Surface style={styles.sectionCard} elevation={1}>
@@ -204,8 +204,8 @@ export default function SettingsScreen() {
         />
         <List.Item
           title="Settings Persistence"
-          description="Preferences saved locally via AsyncStorage"
-          left={() => <List.Icon icon="check-circle" color={Colors.brand.primary} />}
+          description="Preferences saved in memory (session only)"
+          left={() => <List.Icon icon="clock-outline" color={Colors.brand.textMuted} />}
         />
       </Surface>
 
