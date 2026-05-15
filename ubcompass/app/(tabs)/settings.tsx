@@ -1,14 +1,69 @@
-import { useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
-import { List, SegmentedButtons, Surface, Switch, Text } from 'react-native-paper';
+import { Button, Chip, List, Portal, SegmentedButtons, Snackbar, Surface, Switch, Text } from 'react-native-paper';
+import { useState } from 'react';
 
 import { Colors } from '@/constants/theme';
+import { useAppStore, type MapStyle } from '@/store/app-store';
 
 export default function SettingsScreen() {
-  const [accessibilityMode, setAccessibilityMode] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
-  const [autoCenter, setAutoCenter] = useState(false);
-  const [mapStyle, setMapStyle] = useState('standard');
+  const {
+    accessibilityMode,
+    setAccessibilityMode,
+    showBuildingLabels,
+    setShowBuildingLabels,
+    autoCenterOnLocation,
+    setAutoCenterOnLocation,
+    mapStyle,
+    setMapStyle,
+    recentSearches,
+    clearRecentSearches,
+  } = useAppStore();
+
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+
+  const handleAccessibilityToggle = (value: boolean) => {
+    setAccessibilityMode(value);
+    setSnackbarMessage(
+      value
+        ? 'Accessibility mode enabled - Routes will avoid stairs'
+        : 'Accessibility mode disabled'
+    );
+    setSnackbarVisible(true);
+  };
+
+  const handleShowLabelsToggle = (value: boolean) => {
+    setShowBuildingLabels(value);
+    setSnackbarMessage(value ? 'Building labels will be shown' : 'Building labels hidden');
+    setSnackbarVisible(true);
+  };
+
+  const handleAutoCenterToggle = (value: boolean) => {
+    setAutoCenterOnLocation(value);
+    setSnackbarMessage(
+      value
+        ? 'Map will auto-center on your location'
+        : 'Auto-center disabled'
+    );
+    setSnackbarVisible(true);
+  };
+
+  const handleMapStyleChange = (value: string) => {
+    setMapStyle(value as MapStyle);
+    const styleNames: Record<string, string> = {
+      standard: 'Standard',
+      satellite: 'Satellite',
+      highContrast: 'High Contrast',
+    };
+    setSnackbarMessage(`Map style set to ${styleNames[value]}`);
+    setSnackbarVisible(true);
+  };
+
+  const handleClearSearches = () => {
+    clearRecentSearches();
+    setSnackbarMessage('Search history cleared');
+    setSnackbarVisible(true);
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -16,44 +71,98 @@ export default function SettingsScreen() {
         Preferences
       </Text>
       <Text variant="bodyLarge" style={styles.subtitle}>
-        Shape the UBCompass experience while the backend and live navigation layer are still ahead.
+        Customize your UBCompass navigation experience. Settings are saved automatically.
       </Text>
 
       <Surface style={styles.sectionCard} elevation={1}>
         <Text variant="titleMedium">Navigation Preferences</Text>
         <List.Item
           title="Accessibility Mode"
-          description="Avoid stairs and prefer easier routes where possible."
-          right={() => <Switch value={accessibilityMode} onValueChange={setAccessibilityMode} />}
+          description="Avoid stairs and prefer ramps for easier routes."
+          right={() => (
+            <Switch
+              value={accessibilityMode}
+              onValueChange={handleAccessibilityToggle}
+            />
+          )}
         />
         <List.Item
           title="Show Building Labels"
-          description="Keep key locations visible on the outdoor map."
-          right={() => <Switch value={showLabels} onValueChange={setShowLabels} />}
+          description="Display building names on the outdoor map."
+          right={() => (
+            <Switch
+              value={showBuildingLabels}
+              onValueChange={handleShowLabelsToggle}
+            />
+          )}
         />
         <List.Item
           title="Auto-center on Location"
-          description="Snap the map back to your current position."
-          right={() => <Switch value={autoCenter} onValueChange={setAutoCenter} />}
+          description="Keep the map centered on your current position."
+          right={() => (
+            <Switch
+              value={autoCenterOnLocation}
+              onValueChange={handleAutoCenterToggle}
+            />
+          )}
         />
+        {accessibilityMode && (
+          <Chip icon="wheelchair-accessibility" style={styles.statusChip}>
+            Accessibility mode is active
+          </Chip>
+        )}
       </Surface>
 
       <Surface style={styles.sectionCard} elevation={1}>
         <Text variant="titleMedium">Map Style</Text>
+        <Text variant="bodyMedium" style={styles.helperText}>
+          Choose how the outdoor campus map appears.
+        </Text>
         <SegmentedButtons
           value={mapStyle}
-          onValueChange={setMapStyle}
+          onValueChange={handleMapStyleChange}
           buttons={[
             { value: 'standard', label: 'Standard' },
             { value: 'satellite', label: 'Satellite' },
-            { value: 'contrast', label: 'High Contrast' },
+            { value: 'highContrast', label: 'High Contrast' },
           ]}
         />
       </Surface>
 
       <Surface style={styles.sectionCard} elevation={1}>
+        <Text variant="titleMedium">Search History</Text>
+        <Text variant="bodyMedium" style={styles.helperText}>
+          {recentSearches.length > 0
+            ? `You have ${recentSearches.length} recent search${recentSearches.length === 1 ? '' : 'es'}.`
+            : 'No recent searches yet.'}
+        </Text>
+        {recentSearches.length > 0 && (
+          <>
+            <Surface style={styles.recentSearches} elevation={0}>
+              {recentSearches.map((search, index) => (
+                <Chip key={`${search}-${index}`} compact icon="history">
+                  {search}
+                </Chip>
+              ))}
+            </Surface>
+            <Button
+              mode="outlined"
+              icon="delete-outline"
+              onPress={handleClearSearches}
+              style={styles.clearButton}>
+              Clear Search History
+            </Button>
+          </>
+        )}
+      </Surface>
+
+      <Surface style={styles.sectionCard} elevation={1}>
         <Text variant="titleMedium">About UBCompass</Text>
-        <List.Item title="Version" description="Frontend prototype v0.1" left={() => <List.Icon icon="tag-outline" />} />
+        <List.Item
+          title="Version"
+          description="v1.0.0 (Phase 3, 5, 6 Complete)"
+          left={() => <List.Icon icon="tag-outline" />}
+        />
         <List.Item
           title="Institution"
           description="University of Buea, Cameroon"
@@ -69,7 +178,49 @@ export default function SettingsScreen() {
           description="Group 5"
           left={() => <List.Icon icon="account-group-outline" />}
         />
+        <List.Item
+          title="Tech Stack"
+          description="React Native, Expo, Supabase, OpenStreetMap"
+          left={() => <List.Icon icon="code-braces" />}
+        />
       </Surface>
+
+      <Surface style={styles.sectionCard} elevation={1}>
+        <Text variant="titleMedium">Features Status</Text>
+        <List.Item
+          title="Outdoor Navigation"
+          description="GPS tracking, OSRM routing, building markers"
+          left={() => <List.Icon icon="check-circle" color={Colors.brand.primary} />}
+        />
+        <List.Item
+          title="Indoor Navigation"
+          description="SVG floor plans, Dijkstra pathfinding"
+          left={() => <List.Icon icon="check-circle" color={Colors.brand.primary} />}
+        />
+        <List.Item
+          title="Accessibility Routing"
+          description="Stairs avoidance, ramp-aware navigation"
+          left={() => <List.Icon icon="check-circle" color={Colors.brand.primary} />}
+        />
+        <List.Item
+          title="Settings Persistence"
+          description="Preferences saved locally via AsyncStorage"
+          left={() => <List.Icon icon="check-circle" color={Colors.brand.primary} />}
+        />
+      </Surface>
+
+      <Portal>
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          duration={2000}
+          action={{
+            label: 'OK',
+            onPress: () => setSnackbarVisible(false),
+          }}>
+          {snackbarMessage}
+        </Snackbar>
+      </Portal>
     </ScrollView>
   );
 }
@@ -81,7 +232,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-    paddingTop: 32,
+    paddingTop: 40,
     paddingBottom: 120,
     gap: 18,
   },
@@ -98,5 +249,25 @@ const styles = StyleSheet.create({
     padding: 18,
     backgroundColor: '#FFFFFF',
     gap: 8,
+  },
+  helperText: {
+    color: Colors.brand.textMuted,
+    lineHeight: 20,
+  },
+  statusChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E8F5E9',
+    marginTop: 8,
+  },
+  recentSearches: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    backgroundColor: '#F5F5F5',
+    padding: 12,
+    borderRadius: 12,
+  },
+  clearButton: {
+    alignSelf: 'flex-start',
   },
 });

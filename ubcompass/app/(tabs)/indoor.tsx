@@ -1,52 +1,197 @@
 import { Image } from 'expo-image';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View, ActivityIndicator } from 'react-native';
 import {
   Button,
   Chip,
-  SegmentedButtons,
+  Menu,
+  Portal,
+  Snackbar,
   Surface,
   Text,
   TextInput,
 } from 'react-native-paper';
 
 import { useBuildings } from '@/hooks/use-buildings';
+import { useAppStore } from '@/store/app-store';
 import { Colors } from '@/constants/theme';
+import FloorPlan, { getAllRoomsForBuilding, getRoomsForFloor } from '@/components/indoor/FloorPlan';
+import FloorSelector from '@/components/indoor/FloorSelector';
+import { buildGraphFromRooms, findShortestPath, getRoomCenter, type PathResult } from '@/utils/pathfinding';
 
 export default function IndoorScreen() {
   const { buildings: campusBuildings, isLoading } = useBuildings();
-  const indoorPreviewFloors = [
-    { value: '0', label: 'Ground' },
-    { value: '1', label: '1st' },
-    { value: '2', label: '2nd' },
-  ];
+  const { accessibilityMode } = useAppStore();
+
   const indoorBuildings = campusBuildings.filter((building) => building.hasIndoorMap);
   const [selectedBuildingId, setSelectedBuildingId] = useState(indoorBuildings[0]?.id ?? '');
-  const [selectedFloor, setSelectedFloor] = useState('0');
-  const [origin, setOrigin] = useState('Entrance');
-  const [destination, setDestination] = useState('Lab 2');
+  const [selectedFloor, setSelectedFloor] = useState(0);
+  const [originRoom, setOriginRoom] = useState('');
+  const [destinationRoom, setDestinationRoom] = useState('');
+  const [routePath, setRoutePath] = useState<{ x: number; y: number }[] | undefined>();
+  const [routeResult, setRouteResult] = useState<PathResult | null>(null);
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [originMenuVisible, setOriginMenuVisible] = useState(false);
+  const [destinationMenuVisible, setDestinationMenuVisible] = useState(false);
 
   const selectedBuilding =
     indoorBuildings.find((building) => building.id === selectedBuildingId) ?? indoorBuildings[0];
 
-  const floorLabel = selectedFloor === '0' ? 'Ground Floor' : `Floor ${selectedFloor}`;
+  // Get building ID for floor plan (convert to fos format)
+  const floorPlanBuildingId = selectedBuilding?.shortName?.toLowerCase() === 'fos' ? 'fos' : selectedBuildingId;
 
-  const routeSteps = useMemo(
-    () => [
-      `Start from ${origin}`,
-      'Follow the main corridor',
-      selectedBuilding.accessibleEntrance
-        ? 'Use the accessible passage at the junction'
-        : 'Continue past the central stairs',
-      `Arrive at ${destination}`,
-    ],
-    [destination, origin, selectedBuilding.accessibleEntrance]
-  );
+  // Get available floors for the selected building
+  const availableFloors = useMemo(() => {
+    if (!selectedBuilding) return [0];
+    return Array.from({ length: selectedBuilding.floors || 3 }, (_, i) => i);
+  }, [selectedBuilding]);
+
+  // Get rooms for the current building
+  const allRooms = useMemo(() => getAllRoomsForBuilding(floorPlanBuildingId), [floorPlanBuildingId]);
+  const currentFloorRooms = useMemo(() => getRoomsForFloor(floorPlanBuildingId, selectedFloor), [floorPlanBuildingId, selectedFloor]);
+
+  // Build the navigation graph
+  const indoorGraph = useMemo(() => {
+    if (allRooms.length === 0) return null;
+    return buildGraphFromRooms(allRooms);
+  }, [allRooms]);
+
+  // Find route when origin and destination are set
+  const findRoute = useCallback(() => {
+    if (!originRoom || !destinationRoom) {
+      setSnackbarMessage('Please select both origin and destination rooms');
+      setSnackbarVisible(true);
+      return;
+    }
+
+    if (!indoorGraph) {
+      setSnackbarMessage('Indoor map not available for this building');
+      setSnackbarVisible(true);
+      return;
+    }
+
+    const startNodeId = `node-${originRoom}`;
+    const endNodeId = `node-${destinationRoom}`;
+
+    const result = findShortestPath(indoorGraph, startNodeId, endNodeId, accessibilityMode);
+
+    if (result) {
+      setRouteResult(result);
+      setRoutePath(result.coordinates);
+
+      // Check if route includes floor change
+      if (result.includesFloorChange) {
+        const changeType = result.floorChangeType === 'stairs' ? 'stairs' : 'ramp';
+        setSnackbarMessage(`Route includes floor change via ${changeType}`);
+        setSnackbarVisible(true);
+      }
+
+      // Switch to the floor where the route starts
+      const startRoom = allRooms.find(r => r.id === originRoom);
+      if (startRoom) {
+        setSelectedFloor(startRoom.floor);
+      }
+    } else {
+      setSnackbarMessage(
+        accessibilityMode
+          ? 'No accessible route found (accessibility mode is ON)'
+          : 'No route found between these rooms'
+      );
+      setSnackbarVisible(true);
+      setRoutePath(undefined);
+      setRouteResult(null);
+    }
+  }, [originRoom, destinationRoom, indoorGraph, accessibilityMode, allRooms]);
+
+  // Handle room selection from floor plan
+  const handleRoomPress = useCallback((roomId: string) => {
+    if (!originRoom) {
+      setOriginRoom(roomId);
+      setSnackbarMessage(`Origin set: ${roomId}`);
+      setSnackbarVisible(true);
+    } else if (!destinationRoom) {
+      setDestinationRoom(roomId);
+      setSnackbarMessage(`Destination set: ${roomId}`);
+      setSnackbarVisible(true);
+    } else {
+      // Reset and set new origin
+      setOriginRoom(roomId);
+      setDestinationRoom('');
+      setRoutePath(undefined);
+      setRouteResult(null);
+      setSnackbarMessage(`New origin set: ${roomId}`);
+      setSnackbarVisible(true);
+    }
+  }, [originRoom, destinationRoom]);
+
+  // Swap origin and destination
+  const swapRooms = () => {
+    const temp = originRoom;
+    setOriginRoom(destinationRoom);
+    setDestinationRoom(temp);
+    setRoutePath(undefined);
+    setRouteResult(null);
+  };
+
+  // Clear route
+  const clearRoute = () => {
+    setOriginRoom('');
+    setDestinationRoom('');
+    setRoutePath(undefined);
+    setRouteResult(null);
+  };
+
+  // Generate route steps from result
+  const routeSteps = useMemo(() => {
+    if (!routeResult || !allRooms.length) {
+      return [
+        'Select an origin room',
+        'Select a destination room',
+        'Tap "Find Route" to calculate',
+      ];
+    }
+
+    const steps: string[] = [];
+    const originRoomData = allRooms.find(r => r.id === originRoom);
+    const destRoomData = allRooms.find(r => r.id === destinationRoom);
+
+    if (originRoomData) {
+      steps.push(`Start from ${originRoomData.name} (${originRoomData.id})`);
+    }
+
+    steps.push('Follow the main corridor');
+
+    if (routeResult.includesFloorChange) {
+      const changeType = routeResult.floorChangeType === 'stairs' ? 'stairs' : 'ramp';
+      steps.push(`Take the ${changeType} to change floors`);
+    }
+
+    if (accessibilityMode) {
+      steps.push('Using accessible route (avoiding stairs)');
+    }
+
+    if (destRoomData) {
+      steps.push(`Arrive at ${destRoomData.name} (${destRoomData.id})`);
+    }
+
+    return steps;
+  }, [routeResult, allRooms, originRoom, destinationRoom, accessibilityMode]);
+
+  const floorLabel = selectedFloor === 0 ? 'Ground Floor' : `Floor ${selectedFloor}`;
 
   if (isLoading && indoorBuildings.length === 0) {
     return (
       <View style={[styles.screen, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={Colors.brand.primary} />
+      </View>
+    );
+  }
+
+  if (!selectedBuilding) {
+    return (
+      <View style={[styles.screen, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text variant="titleMedium">No buildings with indoor maps available</Text>
       </View>
     );
   }
@@ -64,8 +209,7 @@ export default function IndoorScreen() {
             Explore inside {selectedBuilding.shortName}
           </Text>
           <Text variant="bodyLarge" style={styles.subtitle}>
-            Preview room-to-room flow with a mock indoor route before we connect the full floor
-            graph.
+            Navigate room-to-room with interactive floor plans and accessible routing.
           </Text>
         </View>
       </View>
@@ -77,16 +221,20 @@ export default function IndoorScreen() {
             <Chip
               key={building.id}
               selected={building.id === selectedBuildingId}
-              onPress={() => setSelectedBuildingId(building.id)}
+              onPress={() => {
+                setSelectedBuildingId(building.id);
+                clearRoute();
+              }}
               style={building.id === selectedBuildingId ? styles.selectedChip : styles.chip}>
               {building.shortName}
             </Chip>
           ))}
         </View>
-        <Text variant="bodyMedium" style={styles.helperText}>
-          {selectedBuilding.name} currently has the strongest indoor preview setup in this
-          prototype.
-        </Text>
+        {accessibilityMode && (
+          <Chip icon="wheelchair-accessibility" style={styles.accessibilityChip}>
+            Accessibility mode is ON - routes avoid stairs
+          </Chip>
+        )}
       </Surface>
 
       <View style={styles.statRow}>
@@ -108,20 +256,19 @@ export default function IndoorScreen() {
         </Surface>
         <Surface style={styles.statTile} elevation={0}>
           <Text variant="labelMedium" style={styles.statLabel}>
-            View
+            Rooms
           </Text>
           <Text variant="headlineSmall" style={styles.statValue}>
-            {floorLabel}
+            {allRooms.length}
           </Text>
         </Surface>
       </View>
 
       <Surface style={styles.sectionCard} elevation={1}>
-        <Text variant="titleMedium">Floor Selector</Text>
-        <SegmentedButtons
-          value={selectedFloor}
-          onValueChange={setSelectedFloor}
-          buttons={indoorPreviewFloors}
+        <FloorSelector
+          floors={availableFloors}
+          selectedFloor={selectedFloor}
+          onFloorChange={setSelectedFloor}
         />
 
         <View style={styles.planCard}>
@@ -129,28 +276,23 @@ export default function IndoorScreen() {
             <View>
               <Text variant="titleLarge">{selectedBuilding.name}</Text>
               <Text variant="bodyMedium" style={styles.planCaption}>
-                {floorLabel} preview
+                {floorLabel} - Tap rooms to select
               </Text>
             </View>
-            <Chip compact icon="source-branch" style={styles.planChip}>
-              Demo route
+            <Chip compact icon="gesture-pinch" style={styles.planChip}>
+              Pinch to zoom
             </Chip>
           </View>
 
-          <View style={styles.floorPlanMock}>
-            <View style={[styles.roomBox, styles.roomA]}>
-              <Text variant="labelLarge">Entrance</Text>
-            </View>
-            <View style={[styles.roomBox, styles.roomB]}>
-              <Text variant="labelLarge">Room B</Text>
-            </View>
-            <View style={[styles.roomBox, styles.roomC]}>
-              <Text variant="labelLarge">Lab 2</Text>
-            </View>
-            <View style={styles.corridor} />
-            <View style={styles.routePreview} />
-            <View style={styles.routeDotStart} />
-            <View style={styles.routeDotEnd} />
+          <View style={styles.floorPlanContainer}>
+            <FloorPlan
+              buildingId={floorPlanBuildingId}
+              floor={selectedFloor}
+              selectedRoom={originRoom}
+              destinationRoom={destinationRoom}
+              routePath={routePath}
+              onRoomPress={handleRoomPress}
+            />
           </View>
         </View>
       </Surface>
@@ -158,35 +300,82 @@ export default function IndoorScreen() {
       <Surface style={styles.sectionCard} elevation={1}>
         <Text variant="titleMedium">Route Builder</Text>
         <Text variant="bodyMedium" style={styles.helperText}>
-          Set your origin and destination to preview how indoor directions will feel in the final
-          app.
+          Tap rooms on the floor plan or select from the list below.
         </Text>
-        <TextInput label="From room" mode="outlined" value={origin} onChangeText={setOrigin} />
-        <TextInput
-          label="To room"
-          mode="outlined"
-          value={destination}
-          onChangeText={setDestination}
-        />
+
+        <Menu
+          visible={originMenuVisible}
+          onDismiss={() => setOriginMenuVisible(false)}
+          anchor={
+            <TextInput
+              label="From room"
+              mode="outlined"
+              value={originRoom ? allRooms.find(r => r.id === originRoom)?.name || originRoom : ''}
+              onFocus={() => setOriginMenuVisible(true)}
+              right={<TextInput.Icon icon="chevron-down" />}
+            />
+          }>
+          {currentFloorRooms.map((room) => (
+            <Menu.Item
+              key={room.id}
+              onPress={() => {
+                setOriginRoom(room.id);
+                setOriginMenuVisible(false);
+              }}
+              title={`${room.name} (${room.id})`}
+            />
+          ))}
+        </Menu>
+
+        <Menu
+          visible={destinationMenuVisible}
+          onDismiss={() => setDestinationMenuVisible(false)}
+          anchor={
+            <TextInput
+              label="To room"
+              mode="outlined"
+              value={destinationRoom ? allRooms.find(r => r.id === destinationRoom)?.name || destinationRoom : ''}
+              onFocus={() => setDestinationMenuVisible(true)}
+              right={<TextInput.Icon icon="chevron-down" />}
+            />
+          }>
+          {currentFloorRooms.map((room) => (
+            <Menu.Item
+              key={room.id}
+              onPress={() => {
+                setDestinationRoom(room.id);
+                setDestinationMenuVisible(false);
+              }}
+              title={`${room.name} (${room.id})`}
+            />
+          ))}
+        </Menu>
+
         <View style={styles.routeActionRow}>
-          <Button mode="contained" icon="source-branch">
+          <Button mode="contained" icon="source-branch" onPress={findRoute}>
             Find Route
           </Button>
-          <Button mode="outlined" icon="swap-horizontal" onPress={() => {
-            const currentOrigin = origin;
-            setOrigin(destination);
-            setDestination(currentOrigin);
-          }}>
+          <Button mode="outlined" icon="swap-horizontal" onPress={swapRooms}>
             Swap
+          </Button>
+          <Button mode="text" icon="close" onPress={clearRoute}>
+            Clear
           </Button>
         </View>
       </Surface>
 
       <Surface style={styles.sectionCard} elevation={1}>
-        <Text variant="titleMedium">Route Steps</Text>
+        <View style={styles.stepsHeader}>
+          <Text variant="titleMedium">Route Steps</Text>
+          {routeResult && (
+            <Chip compact icon="map-marker-distance">
+              {Math.round(routeResult.distance)} units
+            </Chip>
+          )}
+        </View>
         <View style={styles.stepsList}>
           {routeSteps.map((step, index) => (
-            <View key={step} style={styles.stepRow}>
+            <View key={`${step}-${index}`} style={styles.stepRow}>
               <View style={styles.stepNumberWrap}>
                 <Text variant="labelMedium" style={styles.stepNumber}>
                   {index + 1}
@@ -199,6 +388,19 @@ export default function IndoorScreen() {
           ))}
         </View>
       </Surface>
+
+      <Portal>
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          duration={3000}
+          action={{
+            label: 'OK',
+            onPress: () => setSnackbarVisible(false),
+          }}>
+          {snackbarMessage}
+        </Snackbar>
+      </Portal>
     </ScrollView>
   );
 }
@@ -267,6 +469,10 @@ const styles = StyleSheet.create({
   selectedChip: {
     backgroundColor: '#CFE6C8',
   },
+  accessibilityChip: {
+    backgroundColor: '#FFF3E0',
+    alignSelf: 'flex-start',
+  },
   helperText: {
     color: Colors.brand.textMuted,
     lineHeight: 22,
@@ -309,85 +515,20 @@ const styles = StyleSheet.create({
   planChip: {
     backgroundColor: '#EEF6EA',
   },
-  floorPlanMock: {
-    marginTop: 2,
+  floorPlanContainer: {
     height: 280,
-    borderRadius: 24,
-    backgroundColor: '#FFFFFF',
-    position: 'relative',
+    borderRadius: 16,
     overflow: 'hidden',
-  },
-  roomBox: {
-    position: 'absolute',
-    backgroundColor: '#E7F3E2',
-    borderWidth: 2,
-    borderColor: Colors.brand.primary,
-    borderRadius: 18,
-    padding: 10,
-  },
-  roomA: {
-    top: 16,
-    left: 16,
-    width: 130,
-    height: 84,
-  },
-  roomB: {
-    top: 16,
-    right: 16,
-    width: 120,
-    height: 84,
-  },
-  roomC: {
-    bottom: 18,
-    right: 22,
-    width: 144,
-    height: 92,
-    backgroundColor: '#D6F0CC',
-  },
-  corridor: {
-    position: 'absolute',
-    top: 112,
-    left: 0,
-    right: 0,
-    height: 46,
-    backgroundColor: '#F3F3F3',
-  },
-  routePreview: {
-    position: 'absolute',
-    left: 76,
-    top: 142,
-    width: 170,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: Colors.brand.route,
-    transform: [{ rotate: '28deg' }],
-  },
-  routeDotStart: {
-    position: 'absolute',
-    left: 74,
-    top: 136,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: Colors.brand.primary,
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
-  },
-  routeDotEnd: {
-    position: 'absolute',
-    right: 70,
-    bottom: 80,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: Colors.brand.route,
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
   },
   routeActionRow: {
     flexDirection: 'row',
     gap: 12,
     flexWrap: 'wrap',
+  },
+  stepsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   stepsList: {
     gap: 12,

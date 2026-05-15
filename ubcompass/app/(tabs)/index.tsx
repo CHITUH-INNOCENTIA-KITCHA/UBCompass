@@ -1,15 +1,17 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View, ActivityIndicator } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import {
   Button,
   Card,
   Chip,
   FAB,
+  Portal,
   Searchbar,
+  Snackbar,
   Surface,
   Text,
   useTheme,
@@ -17,16 +19,29 @@ import {
 
 import { useBuildings } from '@/hooks/use-buildings';
 import { useImages } from '@/hooks/use-images';
+import { useLocation } from '@/hooks/use-location';
+import { useAppStore } from '@/store/app-store';
 import { Colors } from '@/constants/theme';
+import { getWalkingRoute, formatDistance, formatDuration, type Coordinate } from '@/utils/osm-routing';
 
 export default function MapScreen() {
   const theme = useTheme();
   const { buildings: campusBuildings, isLoading: buildingsLoading } = useBuildings();
   const { images: campusImages } = useImages();
+  const { location, errorMsg: locationError, isLoading: locationLoading } = useLocation();
+  const { accessibilityMode, setAccessibilityMode, autoCenterOnLocation } = useAppStore();
+
   const featuredBuildings = campusBuildings.slice(0, 4);
   const heroImage = campusImages[0];
   const galleryImages = campusImages.slice(1);
   const [selectedMapBuildingId, setSelectedMapBuildingId] = useState(featuredBuildings[0]?.id);
+  const [routeCoordinates, setRouteCoordinates] = useState<Coordinate[]>([]);
+  const [routeDistance, setRouteDistance] = useState<number | null>(null);
+  const [routeDuration, setRouteDuration] = useState<number | null>(null);
+  const [isLoadingRoute, setIsLoadingRoute] = useState(false);
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+
   const mapRef = useRef<MapView | null>(null);
   const selectedMapBuilding =
     campusBuildings.find((building) => building.id === selectedMapBuildingId) ?? campusBuildings[0];
@@ -39,49 +54,72 @@ export default function MapScreen() {
     longitudeDelta: 0.0058,
   };
 
-  const routeCoordinates = useMemo(() => {
-    if (!selectedMapBuilding) {
-      return [{ latitude: mainGate.latitude, longitude: mainGate.longitude }];
+  // Show location error in snackbar
+  useEffect(() => {
+    if (locationError) {
+      setSnackbarMessage(locationError);
+      setSnackbarVisible(true);
     }
+  }, [locationError]);
 
-    const midpoint = {
-      latitude: (mainGate.latitude + selectedMapBuilding.latitude) / 2 + 0.00025,
-      longitude: (mainGate.longitude + selectedMapBuilding.longitude) / 2 - 0.00012,
-    };
+  // Fetch route when building is selected
+  const fetchRoute = useCallback(async (destination: { latitude: number; longitude: number }) => {
+    const startPoint = location
+      ? { latitude: location.latitude, longitude: location.longitude }
+      : mainGate;
 
-    return [
-      { latitude: mainGate.latitude, longitude: mainGate.longitude },
-      midpoint,
-      { latitude: selectedMapBuilding.latitude, longitude: selectedMapBuilding.longitude },
-    ];
-  }, [
-    mainGate.latitude,
-    mainGate.longitude,
-    selectedMapBuilding?.latitude,
-    selectedMapBuilding?.longitude,
-  ]);
-
-  const routeDistanceKm = useMemo(() => {
-    if (!selectedMapBuilding) {
-      return '0.0';
+    setIsLoadingRoute(true);
+    try {
+      const result = await getWalkingRoute(startPoint, destination);
+      if (result) {
+        setRouteCoordinates(result.coordinates);
+        setRouteDistance(result.distance);
+        setRouteDuration(result.duration);
+      } else {
+        // Fallback to simple line if OSRM fails
+        const midpoint = {
+          latitude: (startPoint.latitude + destination.latitude) / 2 + 0.00025,
+          longitude: (startPoint.longitude + destination.longitude) / 2 - 0.00012,
+        };
+        setRouteCoordinates([startPoint, midpoint, destination]);
+        // Estimate distance using Haversine
+        const latDiff = destination.latitude - startPoint.latitude;
+        const lonDiff = destination.longitude - startPoint.longitude;
+        const approxMeters = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111000;
+        setRouteDistance(approxMeters);
+        setRouteDuration(approxMeters / 1.4); // ~5 km/h walking speed
+        setSnackbarMessage('Using estimated route (offline mode)');
+        setSnackbarVisible(true);
+      }
+    } catch (error) {
+      console.error('Route fetch error:', error);
+      setSnackbarMessage('Failed to fetch route');
+      setSnackbarVisible(true);
+    } finally {
+      setIsLoadingRoute(false);
     }
+  }, [location, mainGate]);
 
-    const latDiff = selectedMapBuilding.latitude - mainGate.latitude;
-    const lonDiff = selectedMapBuilding.longitude - mainGate.longitude;
-    const approxKm = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111;
+  // Update route when selected building changes
+  useEffect(() => {
+    if (selectedMapBuilding) {
+      fetchRoute({
+        latitude: selectedMapBuilding.latitude,
+        longitude: selectedMapBuilding.longitude,
+      });
+    }
+  }, [selectedMapBuilding?.id, fetchRoute]);
 
-    return approxKm.toFixed(1);
-  }, [
-    mainGate.latitude,
-    mainGate.longitude,
-    selectedMapBuilding?.latitude,
-    selectedMapBuilding?.longitude,
-  ]);
+  // Formatted distance and duration for display
+  const routeDistanceDisplay = useMemo(() => {
+    if (routeDistance === null) return '-- km';
+    return formatDistance(routeDistance);
+  }, [routeDistance]);
 
-  const routeDurationMin = useMemo(() => {
-    const distance = Number(routeDistanceKm);
-    return Math.max(4, Math.round(distance * 12));
-  }, [routeDistanceKm]);
+  const routeDurationDisplay = useMemo(() => {
+    if (routeDuration === null) return '-- min';
+    return formatDuration(routeDuration);
+  }, [routeDuration]);
 
   const focusBuilding = (buildingId: string) => {
     const building = campusBuildings.find((item) => item.id === buildingId);
@@ -103,6 +141,32 @@ export default function MapScreen() {
 
   const focusCampus = () => {
     mapRef.current?.animateToRegion(campusRegion, 500);
+  };
+
+  const focusUserLocation = () => {
+    if (location) {
+      mapRef.current?.animateToRegion(
+        {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          latitudeDelta: 0.003,
+          longitudeDelta: 0.003,
+        },
+        500
+      );
+    } else {
+      setSnackbarMessage('Location not available');
+      setSnackbarVisible(true);
+    }
+  };
+
+  const toggleAccessibilityMode = () => {
+    const newMode = !accessibilityMode;
+    setAccessibilityMode(newMode);
+    setSnackbarMessage(
+      newMode ? 'Accessibility mode ON - Routes will avoid stairs' : 'Accessibility mode OFF'
+    );
+    setSnackbarVisible(true);
   };
 
   return (
@@ -191,12 +255,35 @@ export default function MapScreen() {
                 description="Suggested entry point"
                 pinColor={Colors.brand.accent}
               />
-              <Polyline
-                coordinates={routeCoordinates}
-                strokeColor={Colors.brand.route}
-                strokeWidth={4}
-                lineDashPattern={[1, 0]}
-              />
+              {/* User location blue dot */}
+              {location && (
+                <>
+                  <Circle
+                    center={{ latitude: location.latitude, longitude: location.longitude }}
+                    radius={location.accuracy ?? 20}
+                    fillColor="rgba(66, 133, 244, 0.2)"
+                    strokeColor="rgba(66, 133, 244, 0.5)"
+                    strokeWidth={1}
+                  />
+                  <Marker
+                    coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+                    title="You are here"
+                    anchor={{ x: 0.5, y: 0.5 }}
+                  >
+                    <View style={styles.blueDot}>
+                      <View style={styles.blueDotInner} />
+                    </View>
+                  </Marker>
+                </>
+              )}
+              {routeCoordinates.length > 0 && (
+                <Polyline
+                  coordinates={routeCoordinates}
+                  strokeColor={Colors.brand.route}
+                  strokeWidth={4}
+                  lineDashPattern={[1, 0]}
+                />
+              )}
             </MapView>
             <View style={styles.mapOverlayTop}>
               <Chip icon="routes" compact style={styles.overlayChip}>
@@ -233,7 +320,7 @@ export default function MapScreen() {
                 From
               </Text>
               <Text variant="headlineSmall" style={styles.statValue}>
-                Gate
+                {location ? 'You' : 'Gate'}
               </Text>
             </Surface>
             <Surface style={styles.statTile} elevation={0}>
@@ -241,7 +328,7 @@ export default function MapScreen() {
                 Distance
               </Text>
               <Text variant="headlineSmall" style={styles.statValue}>
-                {routeDistanceKm} km
+                {isLoadingRoute ? '...' : routeDistanceDisplay}
               </Text>
             </Surface>
             <Surface style={styles.statTile} elevation={0}>
@@ -249,7 +336,7 @@ export default function MapScreen() {
                 ETA
               </Text>
               <Text variant="headlineSmall" style={styles.statValue}>
-                {routeDurationMin} min
+                {isLoadingRoute ? '...' : routeDurationDisplay}
               </Text>
             </Surface>
           </View>
@@ -283,9 +370,11 @@ export default function MapScreen() {
               View Stop
             </Button>
             <Button
-              mode="outlined"
-              icon="wheelchair-accessibility">
-              Accessibility Mode
+              mode={accessibilityMode ? 'contained' : 'outlined'}
+              icon="wheelchair-accessibility"
+              onPress={toggleAccessibilityMode}
+              style={accessibilityMode ? styles.accessibilityButtonActive : undefined}>
+              {accessibilityMode ? 'Accessible' : 'Accessibility'}
             </Button>
           </View>
         </Surface>
@@ -383,11 +472,35 @@ export default function MapScreen() {
       </ScrollView>
       )}
 
-      <FAB
-        icon={() => <MaterialCommunityIcons name="map-marker-radius" size={24} color="#FFFFFF" />}
-        style={[styles.fab, { backgroundColor: theme.colors.primary }]}
-        onPress={() => router.push('/search')}
-      />
+      {/* FAB Group */}
+      <View style={styles.fabContainer}>
+        <FAB
+          icon="crosshairs-gps"
+          size="small"
+          style={[styles.fabSecondary, { backgroundColor: '#FFFFFF' }]}
+          color={theme.colors.primary}
+          onPress={focusUserLocation}
+        />
+        <FAB
+          icon={() => <MaterialCommunityIcons name="map-marker-radius" size={24} color="#FFFFFF" />}
+          style={[styles.fab, { backgroundColor: theme.colors.primary }]}
+          onPress={() => router.push('/search')}
+        />
+      </View>
+
+      {/* Snackbar for messages */}
+      <Portal>
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          duration={3000}
+          action={{
+            label: 'OK',
+            onPress: () => setSnackbarVisible(false),
+          }}>
+          {snackbarMessage}
+        </Snackbar>
+      </Portal>
     </View>
   );
 }
@@ -634,9 +747,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 12,
   },
-  fab: {
+  fabContainer: {
     position: 'absolute',
     right: 20,
     bottom: 22,
+    gap: 12,
+    alignItems: 'center',
+  },
+  fab: {
+    elevation: 4,
+  },
+  fabSecondary: {
+    elevation: 2,
+  },
+  blueDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(66, 133, 244, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  blueDotInner: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#4285F4',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  accessibilityButtonActive: {
+    backgroundColor: Colors.brand.accent,
   },
 });
